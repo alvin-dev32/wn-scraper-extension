@@ -57,8 +57,11 @@
   }
 
   function getNextChapterUrl() {
-    var btn = document.querySelector('.btn-primary[href*="/chapter/"]');
-    return btn ? btn.href : null;
+    var btns = document.querySelectorAll('.btn-primary[href*="/chapter/"]');
+    for (var i = 0; i < btns.length; i++) {
+      if (/next/i.test(btns[i].textContent)) return btns[i].href;
+    }
+    return null;
   }
 
   function getChapterIdFromUrl() {
