@@ -19,6 +19,12 @@
       "run_at": "document_idle"
     },
     {
+      "matches": ["https://www.webnovel.com/book/*"],
+      "js": ["content-wn-main.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    },
+    {
       "matches": ["https://www.royalroad.com/fiction/*/chapter/*"],
       "js": ["content-rr.js"],
       "run_at": "document_idle"
