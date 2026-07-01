@@ -7,7 +7,11 @@
   }
 
   function saveState(state) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      console.warn("[RR-Scraper] localStorage save failed:", e.message);
+    }
   }
 
   function createBadge() {
@@ -70,112 +74,127 @@
     return parts[1].split("/")[0];
   }
 
-  var contentDiv = document.querySelector(".chapter-inner.chapter-content");
-  if (!contentDiv) return;
+  function run() {
+    var state = getState();
 
-  var state = getState();
+    if (!state.active) {
+      removeBadge();
+      return;
+    }
 
-  if (!state.active) {
-    removeBadge();
-    return;
-  }
+    if (!state.sessionId || !state.sessionStartedAt) {
+      console.log("[RR-Scraper] No session — not auto-starting.");
+      state.active = false;
+      saveState(state);
+      removeBadge();
+      return;
+    }
 
-  if (!state.sessionId || !state.sessionStartedAt) {
-    console.log("[RR-Scraper] No session — not auto-starting.");
-    state.active = false;
+    var elapsed = Date.now() - state.sessionStartedAt;
+    if (elapsed > 5 * 60 * 60 * 1000) {
+      console.log("[RR-Scraper] Session expired — stopping.");
+      state.active = false;
+      state.stoppedReason = "expired";
+      saveState(state);
+      removeBadge();
+      return;
+    }
+
+    var chapterId = getChapterIdFromUrl();
+    var delay = state.delayMs || 2500;
+
+    if (state.lastProcessed === chapterId) {
+      console.log("[RR-Scraper] Already processed this chapter.");
+      return;
+    }
+
+    var chapterTitle = getChapterTitle() || "Chapter";
+    var bookTitle = getBookTitle();
+
+    state.bookName = bookTitle || state.bookName;
+    state.site = "royalroad";
+
+    var text = getChapterContent();
+
+    if (!text) {
+      console.log("[RR-Scraper] No chapter content found. Stopping.");
+      state.active = false;
+      state.stoppedReason = "locked";
+      state.lockedAt = chapterTitle;
+      state.readyToDownload = true;
+      saveState(state);
+      updateBadge("Stopped at " + chapterTitle + " (no content) — " +
+        (state.chapters ? state.chapters.length : 0) + " chapters collected");
+      return;
+    }
+
+    if (!state.chapters) state.chapters = [];
+    if (!state.chapterIndices) state.chapterIndices = [];
+
+    var chapterIndex = state.chapterIndices.length + 1;
+    var isNew = state.chapterIndices.indexOf(chapterId) === -1;
+    if (!isNew) {
+      console.log("[RR-Scraper] " + chapterTitle + " already collected — skipping.");
+      chapterIndex = state.chapterIndices.indexOf(chapterId) + 1;
+    } else {
+      var entry = chapterTitle + "\n\n" + text;
+      state.chapters.push(entry);
+      state.chapterIndices.push(chapterId);
+      chapterIndex = state.chapterIndices.length;
+
+      if (state.downloadMode === "perchapter") {
+        var safeName = (state.bookName || "chapter").replace(/[^a-zA-Z0-9_\-. ]/g, "").replace(/\s+/g, "_");
+        var safeTitle = chapterTitle.replace(/[^a-zA-Z0-9_\-. ]/g, "").replace(/\s+/g, "_");
+        var padded = String(chapterIndex).padStart(3, "0");
+        var fname = safeName + "_" + padded + "_" + safeTitle + ".txt";
+        chrome.runtime.sendMessage({
+          action: "download",
+          text: chapterTitle + "\n\n" + text,
+          filename: fname,
+        });
+      }
+    }
+
+    state.lastProcessed = chapterId;
+    state.currentChapter = chapterIndex;
+    state.currentName = chapterTitle;
     saveState(state);
-    removeBadge();
-    return;
-  }
 
-  var elapsed = Date.now() - state.sessionStartedAt;
-  if (elapsed > 5 * 60 * 60 * 1000) {
-    console.log("[RR-Scraper] Session expired — stopping.");
-    state.active = false;
-    state.stoppedReason = "expired";
-    saveState(state);
-    removeBadge();
-    return;
-  }
+    updateBadge("Collecting " + chapterTitle +
+      " (" + state.chapters.length + " saved)");
 
-  var chapterId = getChapterIdFromUrl();
-  var delay = state.delayMs || 2500;
+    console.log("[RR-Scraper] " + chapterTitle +
+      " (" + state.chapters.length + " total, " + text.length + " chars)");
 
-  if (state.lastProcessed === chapterId) {
-    console.log("[RR-Scraper] Already processed this chapter.");
-    return;
-  }
-
-  var chapterTitle = getChapterTitle() || "Chapter";
-  var bookTitle = getBookTitle();
-
-  state.bookName = bookTitle || state.bookName;
-  state.site = "royalroad";
-
-  var text = getChapterContent();
-
-  if (!text) {
-    console.log("[RR-Scraper] No chapter content found. Stopping.");
-    state.active = false;
-    state.stoppedReason = "locked";
-    state.lockedAt = chapterTitle;
-    state.readyToDownload = true;
-    saveState(state);
-    updateBadge("Stopped at " + chapterTitle + " (no content) — " +
-      (state.chapters ? state.chapters.length : 0) + " chapters collected");
-    return;
-  }
-
-  if (!state.chapters) state.chapters = [];
-  if (!state.chapterIndices) state.chapterIndices = [];
-
-  var chapterIndex = state.chapterIndices.length + 1;
-  var isNew = state.chapterIndices.indexOf(chapterId) === -1;
-  if (!isNew) {
-    console.log("[RR-Scraper] " + chapterTitle + " already collected — skipping.");
-    chapterIndex = state.chapterIndices.indexOf(chapterId) + 1;
-  } else {
-    var entry = chapterTitle + "\n\n" + text;
-    state.chapters.push(entry);
-    state.chapterIndices.push(chapterId);
-    chapterIndex = state.chapterIndices.length;
-
-    if (state.downloadMode === "perchapter") {
-      var safeName = (state.bookName || "chapter").replace(/[^a-zA-Z0-9_\-. ]/g, "").replace(/\s+/g, "_");
-      var safeTitle = chapterTitle.replace(/[^a-zA-Z0-9_\-. ]/g, "").replace(/\s+/g, "_");
-      var padded = String(chapterIndex).padStart(3, "0");
-      var fname = safeName + "_" + padded + "_" + safeTitle + ".txt";
-      chrome.runtime.sendMessage({
-        action: "download",
-        text: chapterTitle + "\n\n" + text,
-        filename: fname,
-      });
+    var nextUrl = getNextChapterUrl();
+    if (nextUrl) {
+      console.log("[RR-Scraper] Next in " + (delay / 1000) + "s...");
+      setTimeout(function () {
+        window.location.href = nextUrl;
+      }, delay);
+    } else {
+      console.log("[RR-Scraper] Complete! " + state.chapters.length + " chapters.");
+      state.active = false;
+      state.stoppedReason = "complete";
+      state.readyToDownload = true;
+      saveState(state);
+      updateBadge("Complete! " + state.chapters.length + " chapters collected.");
     }
   }
 
-  state.lastProcessed = chapterId;
-  state.currentChapter = chapterIndex;
-  state.currentName = chapterTitle;
-  saveState(state);
+  function waitForContent(attempts) {
+    var contentDiv = document.querySelector(".chapter-inner.chapter-content");
+    if (contentDiv) {
+      run();
+    } else if (attempts < 20) {
+      setTimeout(function () { waitForContent(attempts + 1); }, 500);
+    } else {
+      console.log("[RR-Scraper] Content div never appeared after 10s.");
+    }
+  }
 
-  updateBadge("Collecting " + chapterTitle +
-    " (" + state.chapters.length + " saved)");
-
-  console.log("[RR-Scraper] " + chapterTitle +
-    " (" + state.chapters.length + " total, " + text.length + " chars)");
-
-  var nextUrl = getNextChapterUrl();
-  if (nextUrl) {
-    console.log("[RR-Scraper] Next in " + (delay / 1000) + "s...");
-    setTimeout(function () {
-      window.location.href = nextUrl;
-    }, delay);
-  } else {
-    console.log("[RR-Scraper] Complete! " + state.chapters.length + " chapters.");
-    state.active = false;
-    state.stoppedReason = "complete";
-    state.readyToDownload = true;
-    saveState(state);
-    updateBadge("Complete! " + state.chapters.length + " chapters collected.");
+  var state = getState();
+  if (state.active) {
+    waitForContent(0);
   }
 })();

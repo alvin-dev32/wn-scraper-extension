@@ -80,8 +80,6 @@ async function getPageInfo() {
       var dashIdx = title.indexOf(" - ");
       var bookName = dashIdx !== -1 ? title.substring(dashIdx + 3) : title;
       var chapterName = h1 ? h1.textContent.trim() : null;
-      var numMatch = chapterName ? chapterName.match(/chapter\s+(\d+)/i) : null;
-      var chapterIndex = numMatch ? parseInt(numMatch[1]) : null;
       var parts = window.location.pathname.split("/chapter/");
       var chapterId = parts.length >= 2 ? parts[1].split("/")[0] : null;
       var ficMatch = window.location.pathname.match(/^\/fiction\/(\d+)\//);
@@ -93,7 +91,7 @@ async function getPageInfo() {
         bookName: bookName,
         chapterName: chapterName,
         chapterId: chapterId,
-        chapterIndex: chapterIndex,
+        chapterIndex: null,
         fictionPath: fictionPath,
         totalChapterNum: null,
         firstChapterUrl: null,
@@ -106,25 +104,35 @@ async function getPageInfo() {
   return null;
 }
 
-async function fetchRoyalRoadMeta(fictionPath) {
+async function fetchRoyalRoadMeta(fictionPath, currentChapterId) {
   if (!fictionPath) return null;
   const tab = await getActiveTab();
   if (!tab) return null;
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: (path) => {
+      func: (path, chId) => {
         return fetch(path)
           .then(r => r.text())
           .then(html => {
             var doc = new DOMParser().parseFromString(html, "text/html");
             var rows = doc.querySelectorAll("#chapters tbody tr[data-url]");
             var firstUrl = rows.length > 0 ? rows[0].getAttribute("data-url") : null;
-            return { totalChapters: rows.length, firstChapterUrl: firstUrl };
+            var chapterIndex = null;
+            if (chId) {
+              for (var i = 0; i < rows.length; i++) {
+                var url = rows[i].getAttribute("data-url") || "";
+                if (url.indexOf("/chapter/" + chId + "/") !== -1) {
+                  chapterIndex = i + 1;
+                  break;
+                }
+              }
+            }
+            return { totalChapters: rows.length, firstChapterUrl: firstUrl, chapterIndex: chapterIndex };
           })
           .catch(() => null);
       },
-      args: [fictionPath],
+      args: [fictionPath, currentChapterId || null],
     });
     return results?.[0]?.result || null;
   } catch {
@@ -178,7 +186,7 @@ async function refreshUI() {
 
   let rrMeta = null;
   if (site === "royalroad" && info?.fictionPath) {
-    rrMeta = await fetchRoyalRoadMeta(info.fictionPath);
+    rrMeta = await fetchRoyalRoadMeta(info.fictionPath, info.chapterId);
   }
 
   const count = state.chapters?.length || 0;
@@ -242,9 +250,10 @@ async function refreshUI() {
 
   setModeUI(state.downloadMode === "perchapter" ? "perchapter" : "bulk");
 
+  const rrChapterIndex = rrMeta?.chapterIndex || null;
   const onLaterChapter =
     (site === "webnovel" && info?.chapterIndex > 1 && info?.firstChapterId && info.chapterId !== info.firstChapterId) ||
-    (site === "royalroad" && info?.chapterIndex > 1 && rrMeta?.firstChapterUrl);
+    (site === "royalroad" && rrChapterIndex > 1 && rrMeta?.firstChapterUrl);
   if (onLaterChapter && !state.active) {
     gotoRow.style.display = "block";
   } else {
@@ -398,15 +407,20 @@ btnStart.addEventListener("click", async () => {
   }
 
   let showPrompt = false;
+  let chapNum = null;
   if (site === "webnovel" && info.chapterIndex > 1 && info.firstChapterId && info.chapterId !== info.firstChapterId) {
     showPrompt = true;
-  } else if (site === "royalroad" && info.chapterIndex > 1 && info.fictionPath) {
-    const meta = await fetchRoyalRoadMeta(info.fictionPath);
-    if (meta?.firstChapterUrl) showPrompt = true;
+    chapNum = info.chapterIndex;
+  } else if (site === "royalroad" && info.fictionPath) {
+    const meta = await fetchRoyalRoadMeta(info.fictionPath, info.chapterId);
+    if (meta?.chapterIndex > 1 && meta?.firstChapterUrl) {
+      showPrompt = true;
+      chapNum = meta.chapterIndex;
+    }
   }
 
   if (showPrompt) {
-    promptText.textContent = "You're on Chapter " + info.chapterIndex +
+    promptText.textContent = "You're on Chapter " + chapNum +
       ". Start from Chapter 1 instead?";
     startPrompt.style.display = "block";
     btnStart.disabled = true;
