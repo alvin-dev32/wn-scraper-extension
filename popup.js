@@ -198,6 +198,9 @@ async function refreshUI() {
 
   if (state.currentName) {
     currentEl.textContent = state.currentName;
+  } else if (info?.chapterName) {
+    const pos = rrMeta?.chapterIndex;
+    currentEl.textContent = info.chapterName + (pos ? " (" + pos + " of " + rrMeta.totalChapters + ")" : "");
   } else {
     currentEl.textContent = "—";
   }
