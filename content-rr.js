@@ -50,8 +50,8 @@
   }
 
   function getChapterTitle() {
-    var h1 = document.querySelector("h1");
-    return h1 ? h1.textContent.trim() : null;
+    var el = document.querySelector("h1") || document.querySelector(".chapter-inner h2, h2.font-white");
+    return el ? el.textContent.trim() : null;
   }
 
   function getBookTitle() {
@@ -61,9 +61,9 @@
   }
 
   function getNextChapterUrl() {
-    var btns = document.querySelectorAll('.btn-primary[href*="/chapter/"]');
-    for (var i = 0; i < btns.length; i++) {
-      if (/next/i.test(btns[i].textContent)) return btns[i].href;
+    var links = document.querySelectorAll('a[href*="/chapter/"]');
+    for (var i = 0; i < links.length; i++) {
+      if (/next/i.test(links[i].textContent)) return links[i].href;
     }
     return null;
   }

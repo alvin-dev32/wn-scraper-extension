@@ -75,11 +75,11 @@ async function getPageInfo() {
     return await runInTab(() => {
       var contentDiv = document.querySelector(".chapter-inner.chapter-content");
       if (!contentDiv) return null;
-      var h1 = document.querySelector("h1");
+      var titleEl = document.querySelector("h1") || document.querySelector(".chapter-inner h2, h2.font-white");
       var title = document.title.replace(/ \| Royal Road$/, "");
       var dashIdx = title.indexOf(" - ");
       var bookName = dashIdx !== -1 ? title.substring(dashIdx + 3) : title;
-      var chapterName = h1 ? h1.textContent.trim() : null;
+      var chapterName = titleEl ? titleEl.textContent.trim() : null;
       var parts = window.location.pathname.split("/chapter/");
       var chapterId = parts.length >= 2 ? parts[1].split("/")[0] : null;
       var ficMatch = window.location.pathname.match(/^\/fiction\/(\d+)\//);
