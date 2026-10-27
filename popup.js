@@ -7,8 +7,13 @@ async function getActiveTab() {
 
 function detectSite(url) {
   if (!url) return null;
-  if (url.includes("webnovel.com/book/")) return "webnovel";
-  if (url.includes("royalroad.com/fiction/")) return "royalroad";
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") return null;
+    if (parsed.hostname === "www.webnovel.com" && parsed.pathname.startsWith("/book/")) return "webnovel";
+    if (parsed.hostname === "www.royalroad.com" && parsed.pathname.startsWith("/fiction/")) return "royalroad";
+    if (/^(www\.)?freewebnovel\.net$/.test(parsed.hostname)) return "freewebnovel";
+  } catch { return null; }
   return null;
 }
 
@@ -54,6 +59,12 @@ async function getState() {
 async function getPageInfo() {
   const tab = await getActiveTab();
   const site = detectSite(tab?.url);
+
+  if (site === "freewebnovel") {
+    return await runInTab(() => {
+      return globalThis.FreeWebNovel?.getPageInfoWithMeta(document, location.href) || null;
+    });
+  }
 
   if (site === "webnovel") {
     return await runInTabMain(() => {
@@ -181,6 +192,7 @@ async function refreshUI() {
   if (siteLabel) {
     if (site === "webnovel") siteLabel.textContent = "webnovel.com";
     else if (site === "royalroad") siteLabel.textContent = "royalroad.com";
+    else if (site === "freewebnovel") siteLabel.textContent = "freewebnovel.net";
     else siteLabel.textContent = "no supported site";
   }
 
@@ -220,6 +232,16 @@ async function refreshUI() {
     statusEl.className = "status-value stopped";
     btnStart.disabled = false;
     btnStop.disabled = true;
+  } else if (["missing-content", "different-book", "navigation-loop", "expired"].includes(state.stoppedReason)) {
+    statusEl.textContent = {
+      "missing-content": "Paused — no chapter content",
+      "different-book": "Paused — different book",
+      "navigation-loop": "Paused — navigation loop",
+      "expired": "Session expired",
+    }[state.stoppedReason];
+    statusEl.className = "status-value stopped";
+    btnStart.disabled = false;
+    btnStop.disabled = true;
   } else if (count > 0) {
     statusEl.textContent = state.stoppedReason === "manual" ? "Stopped" : "Paused";
     statusEl.className = "status-value stopped";
@@ -256,7 +278,8 @@ async function refreshUI() {
   const rrChapterIndex = rrMeta?.chapterIndex || null;
   const onLaterChapter =
     (site === "webnovel" && info?.chapterIndex > 1 && info?.firstChapterId && info.chapterId !== info.firstChapterId) ||
-    (site === "royalroad" && rrChapterIndex > 1 && rrMeta?.firstChapterUrl);
+    (site === "royalroad" && rrChapterIndex > 1 && rrMeta?.firstChapterUrl) ||
+    (site === "freewebnovel" && !info?.isBookPage && info?.firstChapterUrl && new URL(info.firstChapterUrl).pathname !== info.chapterId);
   if (onLaterChapter && !state.active) {
     gotoRow.style.display = "block";
   } else {
@@ -334,8 +357,14 @@ async function startScraping(navigateToFirst) {
   const site = detectSite(tab?.url);
   const info = await getPageInfo();
   if (!info) {
-    alert("Navigate to a chapter page on WebNovel or Royal Road first!");
+    alert("Navigate to a WebNovel or Royal Road chapter, or a FreeWebNovel book/chapter page first. Reload the page after updating the extension.");
     return;
+  }
+
+  if (site === "freewebnovel") {
+    const existing = await getState();
+    if (existing.chapters?.length && existing.bookId !== info.bookId &&
+        !confirm("Starting a different book replaces the saved chapters. Save them first if needed. Continue?")) return;
   }
 
   const sessionId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -343,7 +372,10 @@ async function startScraping(navigateToFirst) {
   const mode = modePerChapter.classList.contains("active") ? "perchapter" : "bulk";
 
   let navUrl = null;
-  if (navigateToFirst) {
+  if (site === "freewebnovel" && (navigateToFirst || info.isBookPage)) {
+    navUrl = info.firstChapterUrl;
+    if (!navUrl) { alert("Could not find the first chapter. Open a chapter page and try again."); return; }
+  } else if (navigateToFirst) {
     if (site === "webnovel" && info.firstChapterId && info.bookId) {
       navUrl = "/book/" + info.bookId + "/" + info.firstChapterId;
     } else if (site === "royalroad" && info.fictionPath) {
@@ -354,18 +386,23 @@ async function startScraping(navigateToFirst) {
 
   await chrome.scripting.executeScript({
     target: { tabId: tab.id },
-    func: (key, sid, delay, downloadMode, url) => {
+    func: (key, sid, delay, downloadMode, url, pageInfo) => {
       const existing = JSON.parse(localStorage.getItem(key) || "{}");
+      const sameBook = pageInfo.site !== "freewebnovel" ||
+        (existing.site === "freewebnovel" && existing.bookId === pageInfo.bookId);
       localStorage.setItem(key, JSON.stringify({
-        chapters: existing.chapters || [],
-        chapterIndices: existing.chapterIndices || [],
+        chapters: sameBook ? existing.chapters || [] : [],
+        chapterIndices: sameBook ? existing.chapterIndices || [] : [],
         active: true, sessionId: sid, sessionStartedAt: Date.now(),
         delayMs: delay, downloadMode: downloadMode,
+        site: pageInfo.site, bookId: pageInfo.bookId, bookName: pageInfo.bookName,
+        totalChapters: pageInfo.totalChapterNum, firstChapterUrl: pageInfo.firstChapterUrl,
+        visitedChapterIds: [],
       }));
       if (url) window.location.href = url;
       else location.reload();
     },
-    args: [STORAGE_KEY, sessionId, delayMs, mode, navUrl],
+    args: [STORAGE_KEY, sessionId, delayMs, mode, navUrl, info],
   });
 
   window.close();
@@ -379,7 +416,13 @@ btnGotoCh1.addEventListener("click", async () => {
     alert("Navigate to a chapter page first!");
     return;
   }
-  if (site === "royalroad" && info.fictionPath) {
+  if (site === "freewebnovel" && info.firstChapterUrl) {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (url) => { window.location.href = url; },
+      args: [info.firstChapterUrl],
+    });
+  } else if (site === "royalroad" && info.fictionPath) {
     const meta = await fetchRoyalRoadMeta(info.fictionPath);
     if (!meta?.firstChapterUrl) { alert("Could not find Chapter 1."); return; }
     await chrome.scripting.executeScript({
@@ -405,13 +448,16 @@ btnStart.addEventListener("click", async () => {
   const site = detectSite(tab?.url);
   const info = await getPageInfo();
   if (!info) {
-    alert("Navigate to a chapter page on WebNovel or Royal Road first!");
+    alert("Navigate to a WebNovel or Royal Road chapter, or a FreeWebNovel book/chapter page first. Reload the page after updating the extension.");
     return;
   }
 
   let showPrompt = false;
   let chapNum = null;
-  if (site === "webnovel" && info.chapterIndex > 1 && info.firstChapterId && info.chapterId !== info.firstChapterId) {
+  if (site === "freewebnovel" && !info.isBookPage && info.firstChapterUrl && new URL(info.firstChapterUrl).pathname !== info.chapterId) {
+    showPrompt = true;
+    chapNum = info.chapterIndex || "this chapter";
+  } else if (site === "webnovel" && info.chapterIndex > 1 && info.firstChapterId && info.chapterId !== info.firstChapterId) {
     showPrompt = true;
     chapNum = info.chapterIndex;
   } else if (site === "royalroad" && info.fictionPath) {
@@ -423,7 +469,7 @@ btnStart.addEventListener("click", async () => {
   }
 
   if (showPrompt) {
-    promptText.textContent = "You're on Chapter " + chapNum +
+    promptText.textContent = (typeof chapNum === "number" ? "You're on Chapter " + chapNum : "You're on " + chapNum) +
       ". Start from Chapter 1 instead?";
     startPrompt.style.display = "block";
     btnStart.disabled = true;

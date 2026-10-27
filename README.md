@@ -1,6 +1,6 @@
 # WebNovel Chapter Collector
 
-A browser extension (Manifest V3) that collects chapter text from [webnovel.com](https://www.webnovel.com) for personal offline reading analysis. It works by reading a global JavaScript variable (`chapInfo`) that WebNovel sets on every chapter page, extracting the paragraph text, and automatically navigating through chapters one by one.
+A browser extension (Manifest V3) that collects chapter text from [WebNovel](https://www.webnovel.com), [Royal Road](https://www.royalroad.com), and [FreeWebNovel](https://freewebnovel.net) for personal offline reading analysis. It reads WebNovel's `chapInfo` data or the chapter DOM on Royal Road and FreeWebNovel, then navigates through chapters one by one.
 
 Built for **Firefox** (primary) and **Chrome**. Tested on Firefox MV3 via `about:debugging`.
 
@@ -100,6 +100,16 @@ To install permanently on Firefox, the extension must be signed through [addons.
 
 ## Usage
 
+### FreeWebNovel (new in v3.1)
+
+1. Reload the extension after installing this update, accept its new FreeWebNovel host permissions if prompted, and refresh the site tab.
+2. Open a book page, such as [Sky Pride](https://freewebnovel.net/sky-pride.html), or any chapter page on `freewebnovel.net`.
+3. Click **Start**. From a book page, collection begins at the **Read first** chapter. From a later chapter, choose to start there or return to Chapter 1.
+4. The extension follows the actual **Next Chapter** links, including entries without chapter numbers. A paginated table of contents does not limit collection to the first page.
+5. Use **Stop**, **Save**, **Reset**, the speed slider, and either download mode as usual. Starting another book asks before replacing saved chapters.
+
+FreeWebNovel support also covers `www.freewebnovel.net`. Navigation stays on the current origin so local progress remains accessible. Chapter URLs identify duplicates. The book's chapter-count metadata supplies the displayed total; the actual next link determines when collection ends. Missing chapter content pauses collection and preserves the chapters already saved.
+
 ### Basic Workflow
 
 1. Navigate to a chapter page on `webnovel.com` (any URL matching `https://www.webnovel.com/book/*`)
@@ -197,6 +207,10 @@ Click **Reset** to delete all collected chapters from localStorage. A confirmati
 wn-scraper-extension/
 ├── manifest.json      # MV3 extension manifest — permissions, content scripts, background
 ├── content.js         # Content script — injects scraper into page MAIN world
+├── content-wn-main.js # WebNovel MAIN-world collector
+├── content-rr.js      # Royal Road DOM collector
+├── freewebnovel.js    # FreeWebNovel DOM reader and catalog metadata
+├── content-fwn.js     # FreeWebNovel collection, progress, and navigation
 ├── popup.html         # Popup UI — dark themed control panel with status card
 ├── popup.js           # Popup logic — button handlers, state management, downloads
 ├── background.js      # Background script — handles Save As downloads via message passing
@@ -393,7 +407,7 @@ This works because content scripts have access to the page DOM and can read nonc
 | `activeTab` | Grants temporary access to the currently focused tab when the user clicks the extension icon |
 | `downloads` | Required for `chrome.downloads.download` with `saveAs: true` to trigger the native OS file picker dialog in the Save As flow |
 
-**Host permission:** `https://www.webnovel.com/*` — required for the content script to inject into webnovel.com pages and for `chrome.scripting.executeScript` to target those tabs.
+**Host permissions:** `https://www.webnovel.com/*`, `https://www.royalroad.com/*`, `https://freewebnovel.net/*`, and `https://www.freewebnovel.net/*` allow content scripts and popup script injections on the supported sites. FreeWebNovel uses the ISOLATED world and does not need access to page JavaScript globals.
 
 ---
 
@@ -482,6 +496,12 @@ Each chapter entry starts with `Chapter {index}: {name}` followed by a blank lin
 - The manifest must use `"background": { "scripts": ["background.js"] }`, not `"service_worker"`. This is already fixed in v2.
 
 ---
+
+## Development checks
+
+Install test dependencies with `npm install`, install a Chromium test browser with `npx playwright install chromium`, then run `npm test`.
+
+The FreeWebNovel tests cover catalog metadata, content cleanup, safe next links, deduplication, download messages, Stop/Reset, expired sessions, missing content, navigation loops, and a complete book-page-to-chapters flow using the unpacked extension in Chromium. Fixtures use synthetic chapter text. Set `CHROMIUM_EXECUTABLE_PATH` to use an existing compatible Chromium binary.
 
 ## License
 
