@@ -1,12 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Chapter Collector",
-  "version": "3.0",
-  "description": "Collect chapters from WebNovel and Royal Road for personal analysis",
+  "version": "3.1",
+  "description": "Collect chapters from WebNovel, Royal Road, and FreeWebNovel for personal analysis",
   "permissions": ["storage", "scripting", "activeTab", "downloads"],
   "host_permissions": [
     "https://www.webnovel.com/*",
-    "https://www.royalroad.com/*"
+    "https://www.royalroad.com/*",
+    "https://freewebnovel.net/*",
+    "https://www.freewebnovel.net/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -27,6 +29,11 @@
     {
       "matches": ["https://www.royalroad.com/fiction/*/chapter/*"],
       "js": ["content-rr.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://freewebnovel.net/*", "https://www.freewebnovel.net/*"],
+      "js": ["freewebnovel.js", "content-fwn.js"],
       "run_at": "document_idle"
     }
   ],
